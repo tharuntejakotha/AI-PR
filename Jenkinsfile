@@ -3,15 +3,12 @@ pipeline {
 
     stages {
 
-       
-
         stage('Build') {
             steps {
                 script {
                     try {
-                        sh 'mvn clean install'
+                        bat 'mvn clean install'
                     } catch (Exception e) {
-                        env.BUILD_FAILED = "true"
                         echo "Build failed"
                     }
                 }
@@ -22,9 +19,8 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh 'mvn sonar:sonar'
+                        bat 'mvn sonar:sonar'
                     } catch (Exception e) {
-                        env.SONAR_FAILED = "true"
                         echo "Sonar check failed"
                     }
                 }
@@ -32,13 +28,8 @@ pipeline {
         }
 
         stage('AI Review') {
-            when {
-                expression {
-                    return env.BUILD_FAILED == "true" || env.SONAR_FAILED == "true"
-                }
-            }
             steps {
-                sh 'curl http://localhost:8080/ai/review'
+                bat 'curl http://localhost:8080/ai/review'
             }
         }
 
