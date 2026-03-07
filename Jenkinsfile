@@ -17,15 +17,13 @@ pipeline {
 
         stage('Sonar Scan') {
             steps {
-                bat 'mvnw.cmd sonar:sonar'
+                bat 'mvnw.cmd clean verify sonar:sonar -Dsonar.projectKey=bug-demo -Dsonar.host.url=http://localhost:9000'
             }
         }
 
         stage('Fetch Sonar Issues') {
             steps {
-                bat '''
-                curl "%SONAR_URL%/api/issues/search?componentKeys=%SONAR_PROJECT%" > sonar_issues.json
-                '''
+                bat 'curl "%SONAR_URL%/api/issues/search?componentKeys=%SONAR_PROJECT%" -o sonar_issues.json'
             }
         }
 
@@ -34,7 +32,7 @@ pipeline {
                 bat '''
                 curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=%GEMINI_API_KEY%" ^
                 -H "Content-Type: application/json" ^
-                -d "{\\"contents\\":[{\\"parts\\":[{\\"text\\":\\"Analyze these SonarQube issues and suggest fixes\\"}]}]}"
+                -d "{\\"contents\\":[{\\"parts\\":[{\\"text\\":\\"Analyze SonarQube issues and suggest fixes\\"}]}]}"
                 '''
             }
         }
