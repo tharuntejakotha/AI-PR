@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/tharuntejakotha/bug-demo.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean install'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarServer') {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+
+        stage('AI Review') {
+            steps {
+                sh 'curl http://localhost:8081/ai/review'
+            }
+        }
+    }
+}
