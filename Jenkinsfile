@@ -3,11 +3,7 @@ pipeline {
 
     stages {
 
-        stage('Checkout') {
-            steps {
-                git 'https://github.com/tharuntejakotha/bug-demo.git'
-            }
-        }
+       
 
         stage('Build') {
             steps {
