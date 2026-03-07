@@ -40,21 +40,25 @@ stage('AI Review') {
         powershell '''
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
 
-        $body = @"
-{
-  "contents": [
-    {
-      "parts": [
-        {
-          "text": "Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for runtime errors, SQL injection vulnerabilities, and security issues."
+        $bodyObject = @{
+            contents = @(
+                @{
+                    parts = @(
+                        @{
+                            text = "Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for runtime errors, SQL injection risks, and security vulnerabilities."
+                        }
+                    )
+                }
+            )
         }
-      ]
-    }
-  ]
-}
-"@
 
-        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+        $jsonBody = $bodyObject | ConvertTo-Json -Depth 5
+
+        Invoke-RestMethod `
+            -Uri $url `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body $jsonBody
         '''
     }
 }
