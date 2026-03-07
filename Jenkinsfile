@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+        GEMINI_API_KEY = "AIzaSyBsFzhZVYGrpR6T8IeEyK_n672S7B216Sg"
         SONAR_URL = "http://localhost:9000"
         SONAR_PROJECT = "bug-demo"
     }
