@@ -40,36 +40,48 @@ stage('AI Review') {
         powershell '''
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
 
-        $issues = Get-Content sonar_issues.json | ConvertFrom-Json
-
-        $summary = ""
-
-        foreach ($issue in $issues.issues) {
-            $summary += "Rule: " + $issue.rule + "`n"
-            $summary += "Severity: " + $issue.severity + "`n"
-            $summary += "Message: " + $issue.message + "`n"
-            $summary += "File: " + $issue.component + "`n`n"
+        # Check if file exists to avoid errors
+        if (-not (Test-Path sonar_issues.json)) { 
+            Write-Error "sonar_issues.json not found"; exit 1 
         }
 
+        $issuesJson = Get-Content sonar_issues.json -Raw | ConvertFrom-Json
+        
+        # Limit the number of issues to avoid hitting token/payload limits
+        $issueList = $issuesJson.issues | Select-Object -First 15 
+
+        $summary = "Analyze these SonarQube issues for a Java Spring Boot project and suggest fixes:`n`n"
+        foreach ($issue in $issueList) {
+            $summary += "Rule: $($issue.rule)`nSeverity: $($issue.severity)`nMessage: $($issue.message)`nFile: $($issue.component)`n---`n"
+        }
+
+        # Construct the body as a clean PowerShell Object
         $body = @{
             contents = @(
                 @{
                     parts = @(
-                        @{
-                            text = "Analyze these SonarQube issues from a Java Spring Boot project and suggest fixes:`n`n$summary"
-                        }
+                        @{ text = $summary }
                     )
                 }
             )
         }
 
-        $jsonBody = $body | ConvertTo-Json -Depth 6
+        # Convert to JSON with -Compress to remove problematic whitespace
+        $jsonBody = $body | ConvertTo-Json -Depth 10 -Compress
 
-        Invoke-RestMethod `
-            -Uri $url `
-            -Method Post `
-            -ContentType "application/json" `
-            -Body $jsonBody
+        try {
+            $response = Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $jsonBody
+            Write-Output "AI Analysis Result:"
+            Write-Output ($response.candidates[0].content.parts[0].text)
+        } catch {
+            Write-Error "API Request failed: $_"
+            if ($_.Exception.Response) {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $errorDetails = $reader.ReadToEnd()
+                Write-Output "Error Details: $errorDetails"
+            }
+            exit 1
+        }
         '''
     }
 }
