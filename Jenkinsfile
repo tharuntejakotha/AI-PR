@@ -38,7 +38,7 @@ pipeline {
 stage('AI Review') {
     steps {
         powershell '''
-        $url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
 
         $body = @"
 {
@@ -46,7 +46,7 @@ stage('AI Review') {
     {
       "parts": [
         {
-          "text": "Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for runtime errors, SQL injection risks, and security vulnerabilities."
+          "text": "Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for runtime errors, SQL injection vulnerabilities, and security issues."
         }
       ]
     }
