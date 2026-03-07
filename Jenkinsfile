@@ -36,16 +36,15 @@ pipeline {
                 '''
             }
         }
-       stage('AI Review') {
-            steps {
-
-                bat '''
-                curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=%GEMINI_API_KEY%" ^
-                -H "Content-Type: application/json" ^
-                -d "{\\"contents\\":[{\\"parts\\":[{\\"text\\":\\"Analyze the SonarQube issues in this project and suggest fixes for SQL injection, runtime errors and security vulnerabilities.\\"}]}]}"
-                '''
-            }
-        }
+   stage('AI Review') {
+    steps {
+        bat '''
+        curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%GEMINI_API_KEY%" ^
+        -H "Content-Type: application/json" ^
+        -d "{\\"contents\\":[{\\"parts\\":[{\\"text\\":\\"Analyze the SonarQube issues in this project and suggest fixes for SQL injection, runtime errors and security vulnerabilities.\\"}]}]}"
+        '''
+    }
+}
 
     }
 }
