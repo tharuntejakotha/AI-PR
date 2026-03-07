@@ -38,10 +38,25 @@ pipeline {
         }
 stage('AI Review') {
     steps {
-        bat '''
-        echo { "contents":[{"parts":[{"text":"Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for security vulnerabilities and runtime errors."}]}] } > request.json
-        type request.json
-        curl --location --request POST "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=%GEMINI_API_KEY%" --header "Content-Type: application/json" --data-binary "@request.json"
+        powershell '''
+        $body = @{
+            contents = @(
+                @{
+                    parts = @(
+                        @{
+                            text = "Analyze the SonarQube issues in this Java Spring Boot project and suggest fixes for security vulnerabilities and runtime errors."
+                        }
+                    )
+                }
+            )
+        } | ConvertTo-Json -Depth 5
+
+        $url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
+
+        Invoke-RestMethod -Method Post `
+            -Uri $url `
+            -ContentType "application/json" `
+            -Body $body
         '''
     }
 }
