@@ -40,21 +40,30 @@ stage('AI Review') {
         powershell '''
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$env:GEMINI_API_KEY"
 
-        $issues = Get-Content "sonar_issues.json" -Raw
+        $issues = Get-Content sonar_issues.json | ConvertFrom-Json
 
-        $bodyObject = @{
+        $summary = ""
+
+        foreach ($issue in $issues.issues) {
+            $summary += "Rule: " + $issue.rule + "`n"
+            $summary += "Severity: " + $issue.severity + "`n"
+            $summary += "Message: " + $issue.message + "`n"
+            $summary += "File: " + $issue.component + "`n`n"
+        }
+
+        $body = @{
             contents = @(
                 @{
                     parts = @(
                         @{
-                            text = "Analyze these SonarQube issues and suggest code fixes for a Java Spring Boot project: $issues"
+                            text = "Analyze these SonarQube issues from a Java Spring Boot project and suggest fixes:`n`n$summary"
                         }
                     )
                 }
             )
         }
 
-        $jsonBody = $bodyObject | ConvertTo-Json -Depth 10
+        $jsonBody = $body | ConvertTo-Json -Depth 6
 
         Invoke-RestMethod `
             -Uri $url `
