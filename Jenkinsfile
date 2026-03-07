@@ -1,35 +1,41 @@
 pipeline {
     agent any
 
+    environment {
+        GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+        SONAR_URL = "http://localhost:9000"
+        SONAR_PROJECT = "bug-demo"
+    }
+
     stages {
 
         stage('Build') {
             steps {
-                script {
-                    try {
-                        bat 'mvn clean install'
-                    } catch (Exception e) {
-                        echo "Build failed"
-                    }
-                }
+                bat 'mvnw.cmd clean install'
             }
         }
 
         stage('Sonar Scan') {
             steps {
-                script {
-                    try {
-                        bat 'mvn sonar:sonar'
-                    } catch (Exception e) {
-                        echo "Sonar check failed"
-                    }
-                }
+                bat 'mvnw.cmd sonar:sonar'
+            }
+        }
+
+        stage('Fetch Sonar Issues') {
+            steps {
+                bat '''
+                curl "%SONAR_URL%/api/issues/search?componentKeys=%SONAR_PROJECT%" > sonar_issues.json
+                '''
             }
         }
 
         stage('AI Review') {
             steps {
-                bat 'curl http://localhost:8080/ai/review'
+                bat '''
+                curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=%GEMINI_API_KEY%" ^
+                -H "Content-Type: application/json" ^
+                -d "{\\"contents\\":[{\\"parts\\":[{\\"text\\":\\"Analyze these SonarQube issues and suggest fixes\\"}]}]}"
+                '''
             }
         }
 
