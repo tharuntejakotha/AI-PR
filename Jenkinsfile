@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        GEMINI_API_KEY = credentials('gemini-api-key')
+        
         SONAR_URL = "http://localhost:9000"
         SONAR_PROJECT = "bug-demo"
         SONAR_TOKEN = "squ_1362a50ae39789eadef40c96341bbca26fb68957"
@@ -35,32 +35,19 @@ pipeline {
         '''
     }
 }
-  stage('AI Review') {
+stage('AI Review') {
     steps {
-        withCredentials([string(credentialsId: 'gemini-api-key', variable: 'GEMINI_API_KEY')]) {
+        withCredentials([string(credentialsId: 'gpt-api-key', variable: 'OPENAI_API_KEY')]) {
             powershell '''
-            $apiKey = $env:GEMINI_API_KEY
-
-            # Handle Secret File credentials
-            if ($apiKey -match "[:\\\\]" -and (Test-Path $apiKey)) {
-                Write-Output "Credential appears to be a file path. Reading key from file."
-                $apiKey = Get-Content $apiKey -Raw
-            }
-
-            # Trim spaces/newlines
-            $apiKey = $apiKey.Trim()
+            $apiKey = $env:OPENAI_API_KEY.Trim()
 
             if ([string]::IsNullOrWhiteSpace($apiKey)) {
-                Write-Error "GEMINI_API_KEY is empty after trimming."
+                Write-Error "OPENAI_API_KEY missing"
                 exit 1
             }
 
-            # Safe debug (do not expose full key)
-            Write-Output "Gemini key detected."
+            Write-Output "OpenAI key detected"
             Write-Output "Key length: $($apiKey.Length)"
-            Write-Output "Key prefix: $($apiKey.Substring(0,6))..."
-
-            $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
 
             if (-not (Test-Path sonar_issues.json)) {
                 Write-Error "sonar_issues.json not found"
@@ -68,7 +55,7 @@ pipeline {
             }
 
             $issuesJson = Get-Content sonar_issues.json -Raw | ConvertFrom-Json
-            $issueList = $issuesJson.issues | Select-Object -First 15
+            $issueList = $issuesJson.issues | Select-Object -First 10
 
             $summary = "Analyze these SonarQube issues from a Java Spring Boot project and suggest fixes:`n`n"
 
@@ -80,36 +67,32 @@ pipeline {
             }
 
             $body = @{
-                contents = @(
+                model = "gpt-4o-mini"
+                messages = @(
                     @{
-                        parts = @(
-                            @{ text = $summary }
-                        )
+                        role = "user"
+                        content = $summary
                     }
                 )
             }
 
-            $jsonBody = $body | ConvertTo-Json -Depth 10 -Compress
+            $jsonBody = $body | ConvertTo-Json -Depth 10
 
             try {
                 $response = Invoke-RestMethod `
-                    -Uri $url `
+                    -Uri "https://api.openai.com/v1/chat/completions" `
                     -Method Post `
+                    -Headers @{
+                        "Authorization" = "Bearer $apiKey"
+                    } `
                     -ContentType "application/json" `
                     -Body $jsonBody
 
-                Write-Output "AI Analysis Result:"
-                Write-Output ($response.candidates[0].content.parts[0].text)
+                Write-Output "AI Review Result:"
+                Write-Output $response.choices[0].message.content
 
             } catch {
-                Write-Error "API Request failed: $_"
-
-                if ($_.Exception.Response) {
-                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                    $errorDetails = $reader.ReadToEnd()
-                    Write-Output "Error Details: $errorDetails"
-                }
-
+                Write-Error "OpenAI API Request failed: $_"
                 exit 1
             }
             '''
