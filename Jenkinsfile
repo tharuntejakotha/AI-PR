@@ -37,16 +37,16 @@ pipeline {
 }
 stage('AI Review') {
     steps {
-        withCredentials([string(credentialsId: 'gpt-api-key', variable: 'OPENAI_API_KEY')]) {
+        withCredentials([string(credentialsId: 'grok-api-key', variable: 'GROK_API_KEY')]) {
             powershell '''
-            $apiKey = $env:OPENAI_API_KEY.Trim()
+            $apiKey = $env:GROK_API_KEY.Trim()
 
             if ([string]::IsNullOrWhiteSpace($apiKey)) {
-                Write-Error "OPENAI_API_KEY missing"
+                Write-Error "GROK_API_KEY missing"
                 exit 1
             }
 
-            Write-Output "OpenAI key detected"
+            Write-Output "Grok key detected"
             Write-Output "Key length: $($apiKey.Length)"
 
             if (-not (Test-Path sonar_issues.json)) {
@@ -67,7 +67,7 @@ stage('AI Review') {
             }
 
             $body = @{
-                model = "gpt-4o-mini"
+                model = "grok-2-latest"
                 messages = @(
                     @{
                         role = "user"
@@ -80,7 +80,7 @@ stage('AI Review') {
 
             try {
                 $response = Invoke-RestMethod `
-                    -Uri "https://api.openai.com/v1/chat/completions" `
+                    -Uri "https://api.x.ai/v1/chat/completions" `
                     -Method Post `
                     -Headers @{
                         "Authorization" = "Bearer $apiKey"
@@ -92,7 +92,7 @@ stage('AI Review') {
                 Write-Output $response.choices[0].message.content
 
             } catch {
-                Write-Error "OpenAI API Request failed: $_"
+                Write-Error "Grok API Request failed: $_"
                 exit 1
             }
             '''
