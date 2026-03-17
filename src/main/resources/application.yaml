@@ -1,3 +1,7 @@
 spring:
   application:
     name: BugDemo
+server:
+  port: 3300
+openai:
+  api-key: ${OPENAI_API_KEY:}
