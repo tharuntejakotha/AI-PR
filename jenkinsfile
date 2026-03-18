@@ -12,13 +12,13 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'mvn clean install'
+                bat 'mvn clean install'
             }
         }
 
         stage('Sonar Scan') {
             steps {
-                sh 'mvn sonar:sonar'
+                bat 'mvn sonar:sonar'
             }
         }
     }
@@ -26,31 +26,20 @@ pipeline {
     post {
         failure {
             script {
-                // Get last 200 lines of this build's log
-                def logTail = currentBuild.getLog(200).join('\n')
-
                 withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
                     def prompt = """
 You are a CI/CD assistant.
-This is a failing Jenkins Maven build log. Explain the root cause in 3-5 lines
+This Jenkins Maven build failed in job ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
+Explain the most likely root cause in 3-5 lines
 and suggest minimal changes in Java/Maven/Jenkinsfile as comments.
-
-// Build log (tail):
-${logTail}
 """
 
-                    sh """
-curl -s https://api.openai.com/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{
-    "model": "gpt-4.1-mini",
-    "messages": [
-      { "role": "system", "content": "You are a concise CI/CD debugging assistant." },
-      { "role": "user", "content": "${prompt.replace('"', '\\\\"')}" }
-    ],
-    "temperature": 0.2
-  }' | jq -r '.choices[0].message.content' || true
+                    bat """
+curl -s https://api.openai.com/v1/chat/completions ^
+  -H "Content-Type: application/json" ^
+  -H "Authorization: Bearer %OPENAI_API_KEY%" ^
+  -d "{ \\"model\\": \\"gpt-4.1-mini\\", \\"messages\\": [ { \\"role\\": \\"system\\", \\"content\\": \\"You are a concise CI/CD debugging assistant.\\" }, { \\"role\\": \\"user\\", \\"content\\": \\"${prompt.replace('"', '\\\\"')}\\\" } ], \\"temperature\\": 0.2 }" ^
+  | jq -r ".choices[0].message.content" || exit /b 0
 """
                 }
             }
