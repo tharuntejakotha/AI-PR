@@ -18,7 +18,14 @@ pipeline {
 
         stage('Sonar Scan') {
             steps {
-                bat '.\\mvnw.cmd sonar:sonar'
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    bat """
+                    .\\mvnw.cmd sonar:sonar ^
+                      -Dsonar.projectKey=BugDemo ^
+                      -Dsonar.host.url=http://localhost:9000 ^
+                      -Dsonar.login=%SONAR_TOKEN%
+                    """
+                }
             }
         }
     }
@@ -30,8 +37,12 @@ pipeline {
                     def prompt = """
 You are a CI/CD assistant.
 This Jenkins Maven build failed in job ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
-Explain the most likely root cause in 3-5 lines
-and suggest minimal changes in Java/Maven/Jenkinsfile as comments.
+Below is a short error summary from the Jenkins log (for example, Maven or SonarQube failures).
+Based only on that, explain the most likely root cause in 3-5 lines
+and suggest minimal, concrete changes in Java/Maven/Jenkinsfile as comments.
+
+Error summary (example from previous run):
+SonarQube server [http://localhost:9000] can not be reached: Connection refused.
 """
 
                     def safePrompt = prompt.replace('"', '\\\\"').replace('\n', ' ')
