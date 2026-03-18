@@ -5,7 +5,8 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/tharuntejakotha/AI-PR.git'
+                git branch: 'feature-bug',
+                    url: 'https://github.com/tharuntejakotha/AI-PR.git'
             }
         }
 
@@ -26,7 +27,7 @@ pipeline {
         failure {
             script {
                 // Get last 200 lines of this build's log
-                def logTail = currentBuild.rawBuild.getLog(200).join('\n')
+                def logTail = currentBuild.getLog(200).join('\n')
 
                 withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
                     def prompt = """
