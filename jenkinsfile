@@ -61,17 +61,8 @@ Focus on the most likely root cause of the failure and how to fix it.
 Include the relevant error snippet you can infer from the failure context.
 """
 
-                    def promptStr = prompt.toString()
-                    def promptB64 = java.util.Base64.getEncoder().encodeToString(promptStr.getBytes('UTF-8'))
-
-                    // Call OpenAI and capture only the message content (no JSON parsing tools needed).
-                    def aiComment = bat(
-                        returnStdout: true,
-                        script: """powershell -NoProfile -Command \"\$ErrorActionPreference='Stop'; \$prompt=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${promptB64}')); \$escaped=\$prompt -replace '\\\\','\\\\\\\\' -replace '\"','\\\\\\\"' -replace '\\r\\n','\\\\n' -replace '\\r','\\\\n' -replace '\\n','\\\\n'; \$body=\\\"{\\\\\\\"model\\\\\\\":\\\\\\\"gpt-4.1-mini\\\\\\\",\\\\\\\"messages\\\\\\\":[{\\\\\\\"role\\\\\\\":\\\\\\\"system\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"You write clean GitHub PR comments in markdown.\\\\\\\"},{\\\\\\\"role\\\\\\\":\\\\\\\"user\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"\\\$escaped\\\\\\\"}],\\\\\\\"temperature\\\\\\\":0.2}\\\"; \$res=Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/chat/completions' -Headers @{Authorization=('Bearer ' + \$env:OPENAI_API_KEY)} -ContentType 'application/json' -Body \$body; \$res.choices[0].message.content\""""
-                    ).trim()
-
-                    echo "AI Comment Markdown:\\n${aiComment}"
-                    writeFile file: 'ai-pr-comment.md', text: aiComment + System.lineSeparator()
+                    writeFile file: 'ai-pr-prompt.txt', text: prompt
+                    bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/openai_call.ps1'
 
                     if (!prNumber) {
                         // Fallback: try to infer PR number from the current branch name.
@@ -104,10 +95,10 @@ Include the relevant error snippet you can infer from the failure context.
                         }
                     }
 
-                    // Post the comment to GitHub PR.
+                    // Post the comment to GitHub PR (best-effort).
                     try {
                         withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                            bat """powershell -NoProfile -Command \"\$ErrorActionPreference='Stop'; \$comment=Get-Content -Raw -Path 'ai-pr-comment.md'; \$escaped=\$comment -replace '\\\\','\\\\\\\\' -replace '\"','\\\\\\\"' -replace '\\r\\n','\\\\n' -replace '\\r','\\\\n' -replace '\\n','\\\\n'; \$body=\\\"{\\\\\\\"body\\\\\\\":\\\\\\\"\\\$escaped\\\\\\\"}\\\"; Invoke-RestMethod -Method Post -Uri 'https://api.github.com/repos/${githubOwner}/${githubRepo}/issues/${prNumber}/comments' -Headers @{Authorization=('token ' + \$env:GITHUB_TOKEN); Accept='application/vnd.github+json'} -ContentType 'application/json' -Body \$body | Out-Null; Write-Host 'Posted AI comment to GitHub PR #${prNumber}'.\""""
+                            bat "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}"
                         }
                     } catch (e) {
                         echo "GitHub PR comment failed: ${e}"
