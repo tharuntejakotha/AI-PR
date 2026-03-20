@@ -38,10 +38,12 @@ Write-Host "Calling OpenAI (timeout=${TimeoutSec}s)..."
 
 # Use HttpClient + CancellationTokenSource for a reliable timeout.
 $client = [System.Net.Http.HttpClient]::new()
+$client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
 $cts = [System.Threading.CancellationTokenSource]::new()
 $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSec))
 
 try {
+    Write-Host "Preparing request..."
     $request = [System.Net.Http.HttpRequestMessage]::new(
         [System.Net.Http.HttpMethod]::Post,
         $uri
@@ -53,9 +55,11 @@ try {
         'application/json'
     )
 
+    Write-Host "Sending request to OpenAI..."
     $task = $client.SendAsync($request, $cts.Token)
     $resp = $task.GetAwaiter().GetResult()
 
+    Write-Host "Response received (HTTP $($resp.StatusCode))..."
     $respText = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     if (-not $resp.IsSuccessStatusCode) {
         throw ("OpenAI HTTP failure: {0} {1}" -f $resp.StatusCode, $respText)
@@ -63,7 +67,12 @@ try {
 
     $payload = $respText | ConvertFrom-Json
 } catch {
-    Write-Host "OpenAI request failed (timeout=${TimeoutSec}s). Error: $($_.Exception.Message)"
+    $ex = $_.Exception
+    $msg = $ex.Message
+    if ($ex -is [System.Threading.Tasks.TaskCanceledException] -or $ex -is [System.OperationCanceledException]) {
+        $msg = "Timeout reached (${TimeoutSec}s) while calling OpenAI."
+    }
+    Write-Host "OpenAI request failed. $msg"
     throw
 } finally {
     $client.Dispose()
