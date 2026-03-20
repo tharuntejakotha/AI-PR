@@ -18,7 +18,9 @@ $body = @{
     messages = @(
         @{
             role = 'system'
-            content = 'You are a security review assistant. Return ONLY markdown using the required sections: 🔴 Issue, ⚠️ Risk, ✅ Fix (with code snippet), 💡 Recommendation.'
+            # Avoid embedding emoji characters directly in the PS source file
+            # (PowerShell parsing can fail if the file encoding isn't UTF-8 in Jenkins).
+            content = 'You are a security review assistant. Return ONLY markdown using the required sections: Issue, Risk, Fix (with code snippet), Recommendation.'
         },
         @{
             role = 'user'
