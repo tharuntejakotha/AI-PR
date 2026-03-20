@@ -62,7 +62,12 @@ Include the relevant error snippet you can infer from the failure context.
 """
 
                     writeFile file: 'ai-pr-prompt.txt', text: prompt
-                    bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/openai_call.ps1'
+                    try {
+                        bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/openai_call.ps1'
+                    } catch (e) {
+                        echo "OpenAI call failed (skipping GitHub comment): ${e}"
+                        return
+                    }
 
                     if (!prNumber) {
                         // Fallback: try to infer PR number from the current branch name.
