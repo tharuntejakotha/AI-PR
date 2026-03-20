@@ -32,12 +32,19 @@ $body = @{
 
 $bodyJson = $body | ConvertTo-Json -Depth 10
 
-$res = Invoke-RestMethod `
-    -Method Post `
-    -Uri 'https://api.openai.com/v1/chat/completions' `
-    -Headers @{ Authorization = ('Bearer ' + $apiKey) } `
-    -ContentType 'application/json' `
-    -Body $bodyJson
+try {
+    $timeoutSec = 60
+    $res = Invoke-RestMethod `
+        -Method Post `
+        -Uri 'https://api.openai.com/v1/chat/completions' `
+        -Headers @{ Authorization = ('Bearer ' + $apiKey) } `
+        -ContentType 'application/json' `
+        -Body $bodyJson `
+        -TimeoutSec $timeoutSec
+} catch {
+    Write-Host "OpenAI request failed after timeout=${timeoutSec}s"
+    throw
+}
 
 $content = $res.choices[0].message.content
 Set-Content -Path $OutputFile -Value $content -Encoding UTF8
