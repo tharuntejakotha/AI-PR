@@ -86,8 +86,34 @@ Include the relevant error snippet you can infer from the failure context.
                     writeFile file: 'ai-pr-comment.md', text: aiComment + System.lineSeparator()
 
                     if (!prNumber) {
-                        echo "PR number not found (CHANGE_ID/ghprbPullId). Skipping GitHub PR comment."
-                        return
+                        // Fallback: try to infer PR number from the current branch name.
+                        // Works for non-multibranch jobs where CHANGE_ID is not available.
+                        def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: "").trim()
+                        if (branch.startsWith('origin/')) {
+                            branch = branch.substring('origin/'.length())
+                        }
+
+                        if (branch) {
+                            withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                                prNumber = bat(
+                                    returnStdout: true,
+                                    script: """powershell -NoProfile -Command ^
+  \\$ErrorActionPreference = 'Stop'; ^
+  \\$branch = '${branch}'; ^
+  \\$head = '${githubOwner}:' + \\$branch; ^
+  \\$encHead = [uri]::EscapeDataString(\\$head); ^
+  \\$uri = \"https://api.github.com/repos/${githubOwner}/${githubRepo}/pulls?state=open&head=\\$encHead\"; ^
+  \\$res = Invoke-RestMethod -Method Get -Uri \\$uri -Headers @{ Authorization = \\\"token \\$env:GITHUB_TOKEN\\\"; 'Accept' = 'application/vnd.github+json' }; ^
+  if (\\$res -and \\$res.Count -gt 0) { \\$res[0].number } else { '' } ^
+"""
+                                ).trim()
+                            }
+                        }
+
+                        if (!prNumber) {
+                            echo "PR number not found (CHANGE_ID/ghprbPullId) and inference failed. Skipping GitHub PR comment."
+                            return
+                        }
                     }
 
                     // Post the comment to GitHub PR.
