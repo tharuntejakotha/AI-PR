@@ -33,26 +33,79 @@ pipeline {
     post {
         failure {
             script {
+                // Post AI output as a GitHub PR comment (Jenkins-only POC).
+                // Requires:
+                // - Jenkins credential id: `openai-api-key` (Secret text)
+                // - Jenkins credential id: `github-token` (PAT) with permission to comment on PRs
+                // - PR number available via CHANGE_ID (Multibranch Pipeline) or ghprbPullId
+                def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: "").trim()
+                def githubOwner = "tharuntejakotha"
+                def githubRepo = "AI-PR"
+
                 withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
                     def prompt = """
-You are a CI/CD assistant.
-This Jenkins Maven build failed in job ${env.JOB_NAME} build #${env.BUILD_NUMBER}.
-Below is a short error summary from the Jenkins log (for example, Maven or SonarQube failures).
-Based only on that, explain the most likely root cause in 3-5 lines
-and suggest minimal, concrete changes in Java/Maven/Jenkinsfile as comments.
+You are a senior security review assistant for CI/CD failures.
 
-Error summary (example from previous run):
-SonarQube server [http://localhost:9000] can not be reached: Connection refused.
+An automated Jenkins build failed.
+Job: ${env.JOB_NAME}
+Build: #${env.BUILD_NUMBER}
+
+Return ONLY valid markdown with this exact format:
+🔴 Issue
+⚠️ Risk
+✅ Fix (with code snippet)
+💡 Recommendation
+
+Focus on the most likely root cause of the failure and how to fix it.
+
+Include the relevant error snippet you can infer from the failure context.
 """
 
-                    def safePrompt = prompt.replace('"', '\\\\"').replace('\n', ' ')
+                    def promptB64 = java.util.Base64.getEncoder().encodeToString(prompt.getBytes('UTF-8'))
 
-                    bat """
-curl -s https://api.openai.com/v1/chat/completions ^
-  -H "Content-Type: application/json" ^
-  -H "Authorization: Bearer %OPENAI_API_KEY%" ^
-  -d "{ \\"model\\": \\"gpt-4.1-mini\\", \\"messages\\": [ { \\"role\\": \\"system\\", \\"content\\": \\"You are a concise CI/CD debugging assistant.\\" }, { \\"role\\": \\"user\\", \\"content\\": \\"${safePrompt}\\" } ], \\"temperature\\": 0.2 }"
+                    // Call OpenAI and capture only the message content (no JSON parsing tools needed).
+                    def aiComment = bat(
+                        returnStdout: true,
+                        script: """powershell -NoProfile -Command ^
+  \$ErrorActionPreference = 'Stop'; ^
+  \$prompt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${promptB64}')); ^
+  \$body = @{ ^
+    model = 'gpt-4.1-mini'; ^
+    messages = @(
+      @{ role = 'system'; content = 'You write clean GitHub PR comments in markdown.' },
+      @{ role = 'user'; content = \$prompt }
+    ); ^
+    temperature = 0.2 ^
+  } | ConvertTo-Json -Depth 10; ^
+  \$res = Invoke-RestMethod -Method Post -Uri 'https://api.openai.com/v1/chat/completions' -Headers @{ Authorization = \"Bearer \$env:OPENAI_API_KEY\" } -ContentType 'application/json' -Body \$body; ^
+  \$res.choices[0].message.content ^
 """
+                    ).trim()
+
+                    echo "AI Comment Markdown:\\n${aiComment}"
+                    writeFile file: 'ai-pr-comment.md', text: aiComment + System.lineSeparator()
+
+                    if (!prNumber) {
+                        echo "PR number not found (CHANGE_ID/ghprbPullId). Skipping GitHub PR comment."
+                        return
+                    }
+
+                    // Post the comment to GitHub PR.
+                    try {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            bat """powershell -NoProfile -Command ^
+  \$ErrorActionPreference = 'Stop'; ^
+  \$comment = Get-Content -Raw -Path 'ai-pr-comment.md'; ^
+  \$payload = @{ body = \$comment } | ConvertTo-Json -Depth 10; ^
+  Invoke-RestMethod -Method Post -Uri 'https://api.github.com/repos/${githubOwner}/${githubRepo}/issues/${prNumber}/comments' ^
+    -Headers @{ Authorization = \"token \$env:GITHUB_TOKEN\"; 'Accept' = 'application/vnd.github+json' } ^
+    -ContentType 'application/json' -Body \$payload | Out-Null; ^
+  Write-Host 'Posted AI comment to GitHub PR #${prNumber}'. ^
+"""
+                        }
+                    } catch (e) {
+                        echo "GitHub PR comment failed: ${e}"
+                    }
                 }
             }
         }
