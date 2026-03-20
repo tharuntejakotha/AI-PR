@@ -1,0 +1,13 @@
+[Checkmarx POC sample – replace via secret CHECKMARX_OUTPUT or wire real Checkmarx export]
+
+Query: SQL_Injection
+Severity: High
+File: src/main/java/com/example/BugDemo/controller/BugController.java
+Line: 15
+Description: Potential divide-by-zero or unsafe handling pattern in demo endpoint.
+
+Query: Hardcoded_Secret
+Severity: Medium
+File: src/main/resources/application.yaml
+Line: 7
+Description: Example finding – ensure no real secrets are committed.

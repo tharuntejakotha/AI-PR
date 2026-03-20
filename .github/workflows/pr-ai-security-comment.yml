@@ -1,0 +1,49 @@
+# Minimum POC: PR opened/updated → (Checkmarx-style payload) → OpenAI → comment on same PR.
+# Wire real Checkmarx later by setting secret CHECKMARX_OUTPUT or uploading findings to checkmarx_input.txt.
+
+name: PR security AI comment (Checkmarx POC)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-pr-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Checkmarx payload file
+        env:
+          CX_SECRET: ${{ secrets.CHECKMARX_OUTPUT }}
+        run: |
+          if [ -n "$CX_SECRET" ]; then
+            printf '%s\n' "$CX_SECRET" > checkmarx_input.txt
+          else
+            cp checkmarx-poc/sample-findings.txt checkmarx_input.txt
+            echo "Using sample findings (set repo secret CHECKMARX_OUTPUT for real Checkmarx export)."
+          fi
+
+      - name: Generate comment via OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4.1-mini
+        run: python3 scripts/checkmarx_ai_pr_comment.py checkmarx_input.txt
+
+      - name: Post comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
