@@ -1,14 +1,11 @@
 param(
     [string]$PromptFile = 'ai-pr-prompt.txt',
     [string]$OutputFile = 'ai-pr-comment.md',
-    [string]$Model = 'gpt-4.1-mini'
+    [string]$Model = 'gpt-4.1-mini',
+    [int]$TimeoutSec = 20
 )
 
 $ErrorActionPreference = 'Stop'
-
-param(
-    [int]$TimeoutSec = 20
-)
 
 $apiKey = $env:OPENAI_API_KEY
 if ([string]::IsNullOrWhiteSpace($apiKey)) {
