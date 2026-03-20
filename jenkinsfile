@@ -61,7 +61,8 @@ Focus on the most likely root cause of the failure and how to fix it.
 Include the relevant error snippet you can infer from the failure context.
 """
 
-                    def promptB64 = java.util.Base64.getEncoder().encodeToString(prompt.getBytes('UTF-8'))
+                    def promptStr = prompt.toString()
+                    def promptB64 = java.util.Base64.getEncoder().encodeToString(promptStr.getBytes('UTF-8'))
 
                     // Call OpenAI and capture only the message content (no JSON parsing tools needed).
                     def aiComment = bat(
