@@ -18,7 +18,8 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 
 Write-Host "openai_call.ps1: loading prompt from $PromptFile ..."
 $prompt = Get-Content -Raw -Path $PromptFile -Encoding UTF8
-Write-Host "openai_call.ps1: prompt length $($prompt.Length) characters; building JSON request ..."
+Write-Host "openai_call.ps1: prompt length $($prompt.Length) characters; building request object ..."
+try { [Console]::Out.Flush() } catch { }
 
 $body = @{
     model = $Model
@@ -37,7 +38,10 @@ $body = @{
     temperature = 0.2
 }
 
-$bodyJson = $body | ConvertTo-Json -Depth 10
+Write-Host 'openai_call.ps1: ConvertTo-Json ...'
+$bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+Write-Host "openai_call.ps1: JSON length $($bodyJson.Length) chars"
+try { [Console]::Out.Flush() } catch { }
 
 $uri = 'https://api.openai.com/v1/chat/completions'
 Write-Host "Calling OpenAI (timeout=${TimeoutSec}s); waiting on api.openai.com (this often takes 15-120s) ..."
