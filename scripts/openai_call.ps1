@@ -62,6 +62,11 @@ $uri = 'https://api.openai.com/v1/chat/completions'
 Write-Host "Calling OpenAI (timeout=${TimeoutSec}s); waiting on api.openai.com (this often takes 15-120s) ..."
 try { [Console]::Out.Flush() } catch { }
 
+# Windows PowerShell 5.1: HttpClient is in System.Net.Http, not loaded by default. PS 7+ usually has it already.
+if (-not ('System.Net.Http.HttpClient' -as [type])) {
+    Add-Type -AssemblyName System.Net.Http
+}
+
 # Use HttpClient + CancellationTokenSource for a reliable timeout.
 $client = [System.Net.Http.HttpClient]::new()
 $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
