@@ -16,7 +16,9 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
     throw 'OPENAI_API_KEY not set in environment.'
 }
 
+Write-Host "openai_call.ps1: loading prompt from $PromptFile ..."
 $prompt = Get-Content -Raw -Path $PromptFile -Encoding UTF8
+Write-Host "openai_call.ps1: prompt length $($prompt.Length) characters; building JSON request ..."
 
 $body = @{
     model = $Model
@@ -38,7 +40,8 @@ $body = @{
 $bodyJson = $body | ConvertTo-Json -Depth 10
 
 $uri = 'https://api.openai.com/v1/chat/completions'
-Write-Host "Calling OpenAI (timeout=${TimeoutSec}s)..."
+Write-Host "Calling OpenAI (timeout=${TimeoutSec}s); waiting on api.openai.com (this often takes 15-120s) ..."
+try { [Console]::Out.Flush() } catch { }
 
 # Use HttpClient + CancellationTokenSource for a reliable timeout.
 $client = [System.Net.Http.HttpClient]::new()
@@ -60,6 +63,7 @@ try {
     )
 
     Write-Host "Sending request to OpenAI..."
+    try { [Console]::Out.Flush() } catch { }
     # Avoid deadlock: PowerShell can capture a sync context; never block the pipeline thread
     # waiting on continuations that try to post back to it.
     $sendTask = $client.SendAsync($request, $cts.Token)

@@ -29,4 +29,6 @@ if ($python) {
 
 Write-Host 'Python not on PATH; using PowerShell path (checkmarx_to_openai_prompt.ps1 + openai_call.ps1).'
 & (Join-Path $PSScriptRoot 'checkmarx_to_openai_prompt.ps1') -InputFile $InputFile
+Write-Host 'Starting openai_call.ps1 (network call to OpenAI; console may pause up to the configured timeout).'
+try { [Console]::Out.Flush() } catch { }
 & (Join-Path $PSScriptRoot 'openai_call.ps1')
