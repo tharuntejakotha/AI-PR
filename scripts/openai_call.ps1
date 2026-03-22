@@ -8,6 +8,38 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# Windows PowerShell 5.1: ConvertTo-Json can hang on prompts that contain emoji/Unicode (e.g. from Checkmarx templates).
+# Build JSON with explicit escaping instead.
+function Format-JsonString([string]$Value) {
+    if ($null -eq $Value) { return '""' }
+    $sb = New-Object System.Text.StringBuilder ([Math]::Max(32, $Value.Length * 2 + 2))
+    [void]$sb.Append('"')
+    for ($i = 0; $i -lt $Value.Length; $i++) {
+        $ch = $Value[$i]
+        if ($ch -eq [char]'"') {
+            [void]$sb.Append('\')
+            [void]$sb.Append('"')
+        } elseif ($ch -eq [char]'\') {
+            [void]$sb.Append('\\')
+        } elseif ($ch -eq "`n") {
+            [void]$sb.Append('\n')
+        } elseif ($ch -eq "`r") {
+            [void]$sb.Append('\r')
+        } elseif ($ch -eq "`t") {
+            [void]$sb.Append('\t')
+        } else {
+            $code = [int][char]$ch
+            if ($code -lt 32) {
+                [void]$sb.AppendFormat('\u{0:x4}', $code)
+            } else {
+                [void]$sb.Append($ch)
+            }
+        }
+    }
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
 # Older Windows agents: ensure TLS 1.2 for outbound HTTPS.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -18,28 +50,11 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 
 Write-Host "openai_call.ps1: loading prompt from $PromptFile ..."
 $prompt = Get-Content -Raw -Path $PromptFile -Encoding UTF8
-Write-Host "openai_call.ps1: prompt length $($prompt.Length) characters; building request object ..."
+Write-Host "openai_call.ps1: prompt length $($prompt.Length) characters; building JSON (no ConvertTo-Json) ..."
 try { [Console]::Out.Flush() } catch { }
 
-$body = @{
-    model = $Model
-    messages = @(
-        @{
-            role = 'system'
-            # Avoid embedding emoji characters directly in the PS source file
-            # (PowerShell parsing can fail if the file encoding isn't UTF-8 in Jenkins).
-            content = 'You are a security review assistant. Return ONLY markdown using the required sections: Issue, Risk, Fix (with code snippet), Recommendation.'
-        },
-        @{
-            role = 'user'
-            content = $prompt
-        }
-    )
-    temperature = 0.2
-}
-
-Write-Host 'openai_call.ps1: ConvertTo-Json ...'
-$bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+$systemContent = 'You are a security review assistant. Return ONLY markdown using the required sections: Issue, Risk, Fix (with code snippet), Recommendation.'
+$bodyJson = "{""model"":$(Format-JsonString $Model),""messages"":[{""role"":""system"",""content"":$(Format-JsonString $systemContent)},{""role"":""user"",""content"":$(Format-JsonString $prompt)}],""temperature"":0.2}"
 Write-Host "openai_call.ps1: JSON length $($bodyJson.Length) chars"
 try { [Console]::Out.Flush() } catch { }
 
