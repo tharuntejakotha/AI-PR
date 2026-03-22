@@ -6,6 +6,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+# Older Windows agents: ensure TLS 1.2 for outbound HTTPS.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $apiKey = $env:OPENAI_API_KEY
 if ([string]::IsNullOrWhiteSpace($apiKey)) {
@@ -71,6 +75,9 @@ try {
     $payload = $respText | ConvertFrom-Json
 } catch {
     $ex = $_.Exception
+    while ($ex -is [System.AggregateException] -and $ex.InnerException) {
+        $ex = $ex.InnerException
+    }
     $msg = $ex.Message
     if ($ex -is [System.Threading.Tasks.TaskCanceledException] -or $ex -is [System.OperationCanceledException]) {
         $msg = "Timeout reached (${TimeoutSec}s) while calling OpenAI."
@@ -81,6 +88,9 @@ try {
     $client.Dispose()
 }
 
+if (-not $payload.choices -or $payload.choices.Count -lt 1 -or -not $payload.choices[0].message.content) {
+    throw 'OpenAI response missing choices[0].message.content.'
+}
 $content = $payload.choices[0].message.content
 Set-Content -Path $OutputFile -Value $content -Encoding UTF8
 Write-Host $content

@@ -34,13 +34,47 @@ pipeline {
         failure {
             script {
                 // Post AI output as a GitHub PR comment (Jenkins-only POC).
+                //
+                // Root causes this pipeline avoids:
+                // 1) Deadlock: invoking HttpClient.SendAsync then .GetAwaiter().GetResult() in PowerShell
+                //    without ConfigureAwait($false) blocks forever on many Windows Jenkins agents.
+                // 2) Fragile PR lookup: cmd.exe `bat` + heavily escaped inline PowerShell breaks easily;
+                //    use scripts/resolve_pr_number.ps1 and the Jenkins `powershell` step instead.
+                // 3) Wasted OpenAI calls: resolve PR number before calling the API.
+                //
                 // Requires:
                 // - Jenkins credential id: `openai-api-key` (Secret text)
                 // - Jenkins credential id: `github-token` (PAT) with permission to comment on PRs
-                // - PR number available via CHANGE_ID (Multibranch Pipeline) or ghprbPullId
-                def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: "").trim()
+                // - PR number: CHANGE_ID / ghprbPullId, or branch match via GitHub API (see resolve script)
                 def githubOwner = "tharuntejakotha"
                 def githubRepo = "AI-PR"
+                def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: "").trim()
+
+                def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: "").trim()
+                if (branch.startsWith('origin/')) {
+                    branch = branch.substring('origin/'.length())
+                }
+
+                if (!prNumber && branch) {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                        withEnv(["BRANCH_FOR_PR_RESOLVE=${branch}"]) {
+                            prNumber = powershell(
+                                encoding: 'UTF-8',
+                                returnStdout: true,
+                                script: """
+                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                    Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                    .\\scripts\\resolve_pr_number.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}'
+                                """
+                            ).trim()
+                        }
+                    }
+                }
+
+                if (!prNumber) {
+                    echo 'AI PR comment skipped: no PR number (set CHANGE_ID on PR builds, or ensure an open PR exists for this branch and github-token can read it).'
+                    return
+                }
 
                 withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
                     def prompt = """
@@ -63,51 +97,27 @@ Include the relevant error snippet you can infer from the failure context.
 
                     writeFile file: 'ai-pr-prompt.txt', text: prompt
                     try {
-                        bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/openai_call.ps1'
+                        powershell encoding: 'UTF-8', script: """
+                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                            .\\scripts\\openai_call.ps1
+                        """
                     } catch (e) {
                         echo "OpenAI call failed (skipping GitHub comment): ${e}"
                         return
                     }
+                }
 
-                    if (!prNumber) {
-                        // Fallback: try to infer PR number from the current branch name.
-                        // Works for non-multibranch jobs where CHANGE_ID is not available.
-                        def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: "").trim()
-                        if (branch.startsWith('origin/')) {
-                            branch = branch.substring('origin/'.length())
-                        }
-
-                        if (branch) {
-                            withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                                prNumber = bat(
-                                    returnStdout: true,
-                                    script: """powershell -NoProfile -Command ^
-  \\$ErrorActionPreference = 'Stop'; ^
-  \\$branch = '${branch}'; ^
-  \\$head = '${githubOwner}:' + \\$branch; ^
-  \\$encHead = [uri]::EscapeDataString(\\$head); ^
-  \\$uri = \"https://api.github.com/repos/${githubOwner}/${githubRepo}/pulls?state=open&head=\\$encHead\"; ^
-  \\$res = Invoke-RestMethod -Method Get -Uri \\$uri -Headers @{ Authorization = \\\"token \\$env:GITHUB_TOKEN\\\"; 'Accept' = 'application/vnd.github+json' }; ^
-  if (\\$res -and \\$res.Count -gt 0) { \\$res[0].number } else { '' } ^
-"""
-                                ).trim()
-                            }
-                        }
-
-                        if (!prNumber) {
-                            echo "PR number not found (CHANGE_ID/ghprbPullId) and inference failed. Skipping GitHub PR comment."
-                            return
-                        }
+                try {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                        powershell encoding: 'UTF-8', script: """
+                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                            .\\scripts\\github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}
+                        """
                     }
-
-                    // Post the comment to GitHub PR (best-effort).
-                    try {
-                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                            bat "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}"
-                        }
-                    } catch (e) {
-                        echo "GitHub PR comment failed: ${e}"
-                    }
+                } catch (e) {
+                    echo "GitHub PR comment failed: ${e}"
                 }
             }
         }

@@ -5,6 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
     throw 'GITHUB_TOKEN not set in environment.'
@@ -13,7 +15,11 @@ if ([string]::IsNullOrWhiteSpace($PrNumber)) {
     throw 'PrNumber is empty.'
 }
 
-$comment = Get-Content -Raw -Path 'ai-pr-comment.md' -Encoding UTF8
+$commentPath = Join-Path (Get-Location) 'ai-pr-comment.md'
+if (-not (Test-Path -LiteralPath $commentPath)) {
+    throw "Comment file not found: $commentPath"
+}
+$comment = Get-Content -Raw -LiteralPath $commentPath -Encoding UTF8
 
 $payload = @{
     body = $comment
@@ -27,6 +33,7 @@ Invoke-RestMethod -Method Post -Uri $uri `
     -Headers @{
         Authorization = ('token ' + $env:GITHUB_TOKEN)
         Accept = 'application/vnd.github+json'
+        'User-Agent' = 'Jenkins-AI-PR-comment'
     } `
     -ContentType 'application/json' `
     -Body $payloadJson | Out-Null
