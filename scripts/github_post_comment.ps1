@@ -8,6 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+Write-Host 'github_post_comment.ps1: build with HttpClient + manual JSON (if you do not see this line, Jenkins is running an old script that used ConvertTo-Json and can hang).'
+try { [Console]::Out.Flush() } catch { }
+
 # Same as openai_call.ps1: PS 5.1 ConvertTo-Json can hang on Unicode/emoji in PR bodies.
 function Format-JsonString([string]$Value) {
     if ($null -eq $Value) { return '""' }
@@ -74,8 +77,9 @@ $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSec))
 
 try {
     $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $uri)
-    $request.Headers.UserAgent.ParseAdd('Jenkins-AI-PR-comment')
-    $request.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('token', $env:GITHUB_TOKEN)
+    # GitHub requires a valid User-Agent; use product/version form (ParseAdd without slash can misbehave on some hosts).
+    $request.Headers.TryAddWithoutValidation('User-Agent', 'Jenkins-AI-PR-poc/1.0') | Out-Null
+    $request.Headers.TryAddWithoutValidation('Authorization', ('token ' + $env:GITHUB_TOKEN)) | Out-Null
     $request.Headers.TryAddWithoutValidation('Accept', 'application/vnd.github+json') | Out-Null
     $request.Content = [System.Net.Http.StringContent]::new(
         $bodyJson,

@@ -119,7 +119,12 @@ try {
 if (-not $payload.choices -or $payload.choices.Count -lt 1 -or -not $payload.choices[0].message.content) {
     throw 'OpenAI response missing choices[0].message.content.'
 }
-$content = $payload.choices[0].message.content
+$content = $payload.choices[0].message.content.Trim()
+if ($content.StartsWith('```')) {
+    $content = $content -replace '^\s*```(?:markdown|md)?\s*\r?\n', ''
+    $content = $content -replace '\r?\n\s*```\s*$', ''
+    $content = $content.Trim()
+}
 Set-Content -Path $OutputFile -Value $content -Encoding UTF8
 Write-Host $content
 

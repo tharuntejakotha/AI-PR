@@ -99,6 +99,7 @@ pipeline {
                     }
 
                     try {
+                        echo "GitHub PR comment step: GIT_COMMIT=${env.GIT_COMMIT} (must include fixed github_post_comment.ps1; log should show 'HttpClient + manual JSON' banner)."
                         withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
                             powershell encoding: 'UTF-8', script: """
                                 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
