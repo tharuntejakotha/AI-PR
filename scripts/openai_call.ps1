@@ -2,7 +2,7 @@ param(
     [string]$PromptFile = 'ai-pr-prompt.txt',
     [string]$OutputFile = 'ai-pr-comment.md',
     [string]$Model = 'gpt-4.1-mini',
-    [int]$TimeoutSec = 20
+    [int]$TimeoutSec = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,11 +56,14 @@ try {
     )
 
     Write-Host "Sending request to OpenAI..."
-    $task = $client.SendAsync($request, $cts.Token)
-    $resp = $task.GetAwaiter().GetResult()
+    # Avoid deadlock: PowerShell can capture a sync context; never block the pipeline thread
+    # waiting on continuations that try to post back to it.
+    $sendTask = $client.SendAsync($request, $cts.Token)
+    $resp = $sendTask.ConfigureAwait($false).GetAwaiter().GetResult()
 
     Write-Host "Response received (HTTP $($resp.StatusCode))..."
-    $respText = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    $readTask = $resp.Content.ReadAsStringAsync()
+    $respText = $readTask.ConfigureAwait($false).GetAwaiter().GetResult()
     if (-not $resp.IsSuccessStatusCode) {
         throw ("OpenAI HTTP failure: {0} {1}" -f $resp.StatusCode, $respText)
     }
