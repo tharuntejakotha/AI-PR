@@ -32,15 +32,17 @@
 
 This repo implements the **middle + end** of the chain (payload → AI → PR comment). Wiring Checkmarx’s own trigger/export is product-specific.
 
-## Jenkins (same POC flow)
+## Jenkins (dynamic findings from the build)
 
-Pipeline **`jenkinsfile`** follows the same minimum path on the agent:
+Pipeline **`jenkinsfile`**:
 
-1. **Checkout** (`checkout scm` — use a **Multibranch Pipeline** or job where the SCM ref is the PR so `CHANGE_ID` / branch resolution works).
+1. **Checkout** (`checkout scm` — Multibranch / PR job recommended).
 2. **Build** (Maven).
-3. **Prepare Checkmarx findings** → `checkmarx_input.txt` from optional Jenkins secret text credential **`checkmarx-output`**, or from **`checkmarx-poc/sample-findings.txt`** if that credential is missing.
-4. **Checkmarx scan** — placeholder step; replace with your Checkmarx plugin/CLI and have it **write/update `checkmarx_input.txt`** with the error/export text.
-5. **AI PR comment from Checkmarx** — `scripts/run_checkmarx_ai_jenkins.ps1` runs **`scripts/checkmarx_ai_pr_comment.py`**, then **`scripts/github_post_comment.ps1`** posts **`ai-pr-comment.md`** on the PR.
+3. **Sonar Scan** — `mvn sonar:sonar` (project `BugDemo`, host from pipeline; needs **`sonar-token`**).
+4. **Collect security findings** — If Jenkins secret **`checkmarx-output`** is set, its text becomes **`checkmarx_input.txt`** (optional real Checkmarx export). Otherwise **`scripts/fetch_sonar_issues.ps1`** calls the **SonarQube Web API** and writes **all unresolved issues** (paginated, capped) into **`checkmarx_input.txt`** from the analysis that just ran (no hardcoded sample file).
+5. **AI PR comment from analysis** — `scripts/run_checkmarx_ai_jenkins.ps1` → OpenAI → **`scripts/github_post_comment.ps1`** on the PR.
+
+To scope Sonar by branch (commercial SonarQube), set env **`SONAR_BRANCH`** when invoking **`fetch_sonar_issues.ps1`** (see script parameters).
 
 Jenkins credentials (IDs must match):
 

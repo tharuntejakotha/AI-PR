@@ -16,9 +16,22 @@ pipeline {
             }
         }
 
-        // Optional bootstrap only: if you do NOT run a real scan in the next stage, this copies a tiny sample file.
-        // Production: run ONE full-application Checkmarx scan per pipeline, export ALL findings into one report, then write that text to checkmarx_input.txt (or checkmarx-output secret).
-        stage('Prepare Checkmarx findings') {
+        // Dynamic analysis: full-project scan once per pipeline. Issues are read via API in the next stage.
+        stage('Sonar Scan') {
+            steps {
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    bat """
+                    .\\mvnw.cmd sonar:sonar ^
+                      -Dsonar.projectKey=BugDemo ^
+                      -Dsonar.host.url=http://localhost:9000 ^
+                      -Dsonar.login=%SONAR_TOKEN%
+                    """
+                }
+            }
+        }
+
+        // Build checkmarx_input.txt dynamically: optional Checkmarx export (secret), else SonarQube open issues from the scan above.
+        stage('Collect security findings') {
             steps {
                 script {
                     def wrote = false
@@ -28,35 +41,35 @@ pipeline {
                             if (text) {
                                 writeFile file: 'checkmarx_input.txt', text: env.CX_TEXT
                                 wrote = true
+                                echo 'AI input: using Jenkins credential checkmarx-output (e.g. real Checkmarx export).'
                             }
                         }
                     } catch (Exception e) {
-                        echo "Optional credential 'checkmarx-output' not used (${e.message}). Using repo sample or empty-handling below."
+                        echo "Optional credential checkmarx-output not used (${e.message})."
                     }
                     if (!wrote) {
-                        powershell encoding: 'UTF-8', script: """
-                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
-                            Copy-Item -LiteralPath 'checkmarx-poc/sample-findings.txt' -Destination 'checkmarx_input.txt' -Force
-                        """
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                            def sonarUrl = 'http://localhost:9000'
+                            def sonarKey = 'BugDemo'
+                            echo "AI input: fetching unresolved SonarQube issues from ${sonarUrl} (project ${sonarKey})."
+                            withEnv([
+                                "SONAR_HOST_URL=${sonarUrl}",
+                                "SONAR_PROJECT_KEY=${sonarKey}"
+                            ]) {
+                                powershell encoding: 'UTF-8', script: """
+                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                    Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                    .\\scripts\\fetch_sonar_issues.ps1
+                                """
+                            }
+                        }
                     }
                 }
             }
         }
 
-        stage('Checkmarx scan') {
-            steps {
-                echo '=== Checkmarx: one scan, whole application, all findings ==='
-                echo 'Checkmarx normally scans the entire project in a single run; the report lists every finding in scope (per your preset/policy), not one bug at a time.'
-                echo 'Wire your real integration here (CLI, CxFlow, or Jenkins plugin). After the scan finishes, export the FULL results into workspace file checkmarx_input.txt (SARIF, XML, or plain-text summary).'
-                echo 'This pipeline then sends that whole file to the AI once and posts ONE PR comment covering everything in the file.'
-                echo 'If the export is huge, trim to top severities or summarize before AI to stay within token limits.'
-                echo 'POC: this stage is still a placeholder — sample-findings.txt is only a demo when no real export exists.'
-            }
-        }
-
-        // Minimum agreed flow: Checkmarx-style payload -> OpenAI -> comment on the same PR (requires PR-detected build + credentials).
-        stage('AI PR comment from Checkmarx') {
+        // Sonar/Checkmarx-style payload -> OpenAI -> PR comment (requires PR build + credentials).
+        stage('AI PR comment from analysis') {
             steps {
                 script {
                     def githubOwner = 'tharuntejakotha'
@@ -85,7 +98,7 @@ pipeline {
                     }
 
                     if (!prNumber) {
-                        echo 'Skipped AI PR comment: not a PR build (no CHANGE_ID/ghprbPullId and could not resolve PR from branch). Use a Multibranch Pipeline or GitHub PR trigger.'
+                        echo 'Skipped AI PR comment: not a PR build (no CHANGE_ID/ghprbPullId and could not resolve PR from branch).'
                         return
                     }
 
@@ -105,7 +118,7 @@ pipeline {
                     }
 
                     try {
-                        echo "GitHub PR comment step: GIT_COMMIT=${env.GIT_COMMIT} (must include fixed github_post_comment.ps1; log should show 'HttpClient + manual JSON' banner)."
+                        echo "GitHub PR comment step: GIT_COMMIT=${env.GIT_COMMIT}"
                         withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
                             powershell encoding: 'UTF-8', script: """
                                 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
@@ -116,20 +129,6 @@ pipeline {
                     } catch (e) {
                         echo "GitHub PR comment failed: ${e}"
                     }
-                }
-            }
-        }
-
-        // Runs after Checkmarx/AI path so a missing local Sonar server does not block the security-comment POC.
-        stage('Sonar Scan') {
-            steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    bat """
-                    .\\mvnw.cmd sonar:sonar ^
-                      -Dsonar.projectKey=BugDemo ^
-                      -Dsonar.host.url=http://localhost:9000 ^
-                      -Dsonar.login=%SONAR_TOKEN%
-                    """
                 }
             }
         }
