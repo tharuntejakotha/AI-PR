@@ -3,10 +3,10 @@ pipeline {
 
     stages {
 
+        // Multibranch / GitHub: use SCM from the job (PR branch). Avoid hardcoded branch so PR builds get CHANGE_ID.
         stage('Checkout') {
             steps {
-                git branch: 'feature-bug',
-                    url: 'https://github.com/tharuntejakotha/AI-PR.git'
+                checkout scm
             }
         }
 
@@ -16,6 +16,104 @@ pipeline {
             }
         }
 
+        // POC: integrate Checkmarx output as text. Replace this stage with Checkmarx CLI/plugin; write findings to checkmarx_input.txt.
+        stage('Prepare Checkmarx findings') {
+            steps {
+                script {
+                    def wrote = false
+                    try {
+                        withCredentials([string(credentialsId: 'checkmarx-output', variable: 'CX_TEXT')]) {
+                            def text = (env.CX_TEXT ?: '').trim()
+                            if (text) {
+                                writeFile file: 'checkmarx_input.txt', text: env.CX_TEXT
+                                wrote = true
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Optional credential 'checkmarx-output' not used (${e.message}). Using repo sample or empty-handling below."
+                    }
+                    if (!wrote) {
+                        powershell encoding: 'UTF-8', script: """
+                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                            Copy-Item -LiteralPath 'checkmarx-poc/sample-findings.txt' -Destination 'checkmarx_input.txt' -Force
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Checkmarx scan') {
+            steps {
+                echo 'POC placeholder: run your Checkmarx scan here (plugin/CLI). On completion, write or update checkmarx_input.txt with the error/findings export.'
+            }
+        }
+
+        // Minimum agreed flow: Checkmarx-style payload -> OpenAI -> comment on the same PR (requires PR-detected build + credentials).
+        stage('AI PR comment from Checkmarx') {
+            steps {
+                script {
+                    def githubOwner = 'tharuntejakotha'
+                    def githubRepo = 'AI-PR'
+                    def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: '').trim()
+
+                    def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').trim()
+                    if (branch.startsWith('origin/')) {
+                        branch = branch.substring('origin/'.length())
+                    }
+
+                    if (!prNumber && branch) {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            withEnv(["BRANCH_FOR_PR_RESOLVE=${branch}"]) {
+                                prNumber = powershell(
+                                    encoding: 'UTF-8',
+                                    returnStdout: true,
+                                    script: """
+                                        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                        Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                        .\\scripts\\resolve_pr_number.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}'
+                                    """
+                                ).trim()
+                            }
+                        }
+                    }
+
+                    if (!prNumber) {
+                        echo 'Skipped AI PR comment: not a PR build (no CHANGE_ID/ghprbPullId and could not resolve PR from branch). Use a Multibranch Pipeline or GitHub PR trigger.'
+                        return
+                    }
+
+                    withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
+                        withEnv(['OPENAI_MODEL=gpt-4.1-mini']) {
+                            try {
+                                powershell encoding: 'UTF-8', script: """
+                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                    Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                    .\\scripts\\run_checkmarx_ai_jenkins.ps1 -InputFile 'checkmarx_input.txt'
+                                """
+                            } catch (e) {
+                                echo "OpenAI / Python step failed (no PR comment): ${e}"
+                                throw e
+                            }
+                        }
+                    }
+
+                    try {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            powershell encoding: 'UTF-8', script: """
+                                Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                .\\scripts\\github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}
+                            """
+                        }
+                    } catch (e) {
+                        echo "GitHub PR comment failed: ${e}"
+                    }
+                }
+            }
+        }
+
+        // Runs after Checkmarx/AI path so a missing local Sonar server does not block the security-comment POC.
         stage('Sonar Scan') {
             steps {
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
@@ -29,98 +127,4 @@ pipeline {
             }
         }
     }
-
-    post {
-        failure {
-            script {
-                // Post AI output as a GitHub PR comment (Jenkins-only POC).
-                //
-                // Root causes this pipeline avoids:
-                // 1) Deadlock: invoking HttpClient.SendAsync then .GetAwaiter().GetResult() in PowerShell
-                //    without ConfigureAwait($false) blocks forever on many Windows Jenkins agents.
-                // 2) Fragile PR lookup: cmd.exe `bat` + heavily escaped inline PowerShell breaks easily;
-                //    use scripts/resolve_pr_number.ps1 and the Jenkins `powershell` step instead.
-                // 3) Wasted OpenAI calls: resolve PR number before calling the API.
-                //
-                // Requires:
-                // - Jenkins credential id: `openai-api-key` (Secret text)
-                // - Jenkins credential id: `github-token` (PAT) with permission to comment on PRs
-                // - PR number: CHANGE_ID / ghprbPullId, or branch match via GitHub API (see resolve script)
-                def githubOwner = "tharuntejakotha"
-                def githubRepo = "AI-PR"
-                def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: "").trim()
-
-                def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: "").trim()
-                if (branch.startsWith('origin/')) {
-                    branch = branch.substring('origin/'.length())
-                }
-
-                if (!prNumber && branch) {
-                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                        withEnv(["BRANCH_FOR_PR_RESOLVE=${branch}"]) {
-                            prNumber = powershell(
-                                encoding: 'UTF-8',
-                                returnStdout: true,
-                                script: """
-                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-                                    Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
-                                    .\\scripts\\resolve_pr_number.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}'
-                                """
-                            ).trim()
-                        }
-                    }
-                }
-
-                if (!prNumber) {
-                    echo 'AI PR comment skipped: no PR number (set CHANGE_ID on PR builds, or ensure an open PR exists for this branch and github-token can read it).'
-                    return
-                }
-
-                withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
-                    def prompt = """
-You are a senior security review assistant for CI/CD failures.
-
-An automated Jenkins build failed.
-Job: ${env.JOB_NAME}
-Build: #${env.BUILD_NUMBER}
-
-Return ONLY valid markdown with this exact format:
-🔴 Issue
-⚠️ Risk
-✅ Fix (with code snippet)
-💡 Recommendation
-
-Focus on the most likely root cause of the failure and how to fix it.
-
-Include the relevant error snippet you can infer from the failure context.
-"""
-
-                    writeFile file: 'ai-pr-prompt.txt', text: prompt
-                    try {
-                        powershell encoding: 'UTF-8', script: """
-                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
-                            .\\scripts\\openai_call.ps1
-                        """
-                    } catch (e) {
-                        echo "OpenAI call failed (skipping GitHub comment): ${e}"
-                        return
-                    }
-                }
-
-                try {
-                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
-                        powershell encoding: 'UTF-8', script: """
-                            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-                            Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
-                            .\\scripts\\github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}
-                        """
-                    }
-                } catch (e) {
-                    echo "GitHub PR comment failed: ${e}"
-                }
-            }
-        }
-    }
 }
-
