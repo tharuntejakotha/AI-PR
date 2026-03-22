@@ -1,4 +1,5 @@
-# Jenkins helper: run checkmarx_ai_pr_comment.py with output aligned to github_post_comment.ps1 (ai-pr-comment.md).
+# Jenkins helper: Checkmarx text -> OpenAI -> ai-pr-comment.md (same end state as GitHub Actions).
+# Prefers Python (parity with checkmarx_ai_pr_comment.py); falls back to PowerShell if python/py is missing.
 param(
     [string]$InputFile = 'checkmarx_input.txt'
 )
@@ -10,8 +11,6 @@ if (-not (Test-Path -LiteralPath $InputFile)) {
     throw "Checkmarx input not found: $InputFile"
 }
 
-$env:COMMENT_OUTPUT_FILE = 'ai-pr-comment.md'
-
 $python = $null
 foreach ($name in @('python', 'py')) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -20,9 +19,14 @@ foreach ($name in @('python', 'py')) {
         break
     }
 }
-if (-not $python) {
-    throw 'Python not found on PATH. Install Python 3 or add python/py for the Jenkins agent.'
+
+if ($python) {
+    $env:COMMENT_OUTPUT_FILE = 'ai-pr-comment.md'
+    Write-Host "Using Python: $python"
+    & $python (Join-Path $PSScriptRoot 'checkmarx_ai_pr_comment.py') $InputFile
+    return
 }
 
-Write-Host "Using Python: $python"
-& $python (Join-Path $PSScriptRoot 'checkmarx_ai_pr_comment.py') $InputFile
+Write-Host 'Python not on PATH; using PowerShell path (checkmarx_to_openai_prompt.ps1 + openai_call.ps1).'
+& (Join-Path $PSScriptRoot 'checkmarx_to_openai_prompt.ps1') -InputFile $InputFile
+& (Join-Path $PSScriptRoot 'openai_call.ps1')

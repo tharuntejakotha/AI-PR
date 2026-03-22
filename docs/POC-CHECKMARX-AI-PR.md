@@ -51,7 +51,7 @@ Jenkins credentials (IDs must match):
 | `checkmarx-output` | Secret text (Checkmarx export) | No (sample used if absent) |
 | `sonar-token` | Secret text | Yes for Sonar stage |
 
-**Agent:** Python 3 on `PATH` (`python` or `py`) for the AI step. Sonar runs **after** the Checkmarx/AI path so a down Sonar server does not block the security-comment POC.
+**Agent:** **Python 3** on `PATH` (`python` or `py`) is optional. If Python is missing, Jenkins uses **`checkmarx_to_openai_prompt.ps1`** + **`openai_call.ps1`** (same prompt shape as the Python script). Sonar runs **after** the Checkmarx/AI path so a down Sonar server does not block the security-comment POC.
 
 ## Local test (optional)
 
