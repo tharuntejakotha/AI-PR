@@ -4,6 +4,7 @@ param(
     [string]$SonarHost = $env:SONAR_HOST_URL,
     [string]$ProjectKey = $env:SONAR_PROJECT_KEY,
     [string]$Branch = $env:SONAR_BRANCH,
+    [string]$SourceRoot = 'src/main/java',
     [string]$OutFile = 'checkmarx_input.txt',
     [int]$PageSize = 100,
     [int]$MaxIssues = 500
@@ -65,7 +66,9 @@ do {
 } while ($more)
 
 $sb = New-Object System.Text.StringBuilder
-[void]$sb.AppendLine('[SonarQube — dynamic findings from latest analysis]')
+[void]$sb.AppendLine('[Dynamic findings for AI PR comment]')
+[void]$sb.AppendLine('')
+[void]$sb.AppendLine('Source: SonarQube + local code pattern scan')
 [void]$sb.AppendLine("Project: $ProjectKey")
 if (-not [string]::IsNullOrWhiteSpace($Branch)) {
     [void]$sb.AppendLine("Branch: $Branch")
@@ -93,5 +96,59 @@ if ($all.Count -eq 0) {
     }
 }
 
+[void]$sb.AppendLine('-----')
+[void]$sb.AppendLine('Local code findings (dynamic pattern scan)')
+[void]$sb.AppendLine('')
+
+$localCount = 0
+$rules = @(
+    @{
+        Pattern = '\/\s*0\b'
+        Query = 'Divide_By_Zero_Pattern'
+        Severity = 'HIGH'
+        Type = 'BUG'
+        Description = 'Division by literal zero pattern found in source code.'
+    },
+    @{
+        Pattern = 'throw\s+new\s+SQLException\s*\('
+        Query = 'SQLException_Thrown'
+        Severity = 'MEDIUM'
+        Type = 'CODE_SMELL'
+        Description = 'Code throws SQLException directly; review whether this path reflects a real SQL error flow.'
+    },
+    @{
+        Pattern = 'execute(Query|Update)\s*\(\s*".*"\s*\+\s*'
+        Query = 'Potential_SQL_String_Concatenation'
+        Severity = 'HIGH'
+        Type = 'SECURITY_HOTSPOT'
+        Description = 'Potential SQL query string concatenation detected; validate with prepared statements and input sanitization.'
+    }
+)
+
+if (Test-Path -LiteralPath $SourceRoot) {
+    foreach ($rule in $rules) {
+        $matches = Select-String -Path (Join-Path $SourceRoot '*.java') -Pattern $rule.Pattern -AllMatches -CaseSensitive:$false -Recurse
+        foreach ($m in $matches) {
+            $localCount++
+            $relative = $m.Path.Replace((Get-Location).Path + '\', '')
+            [void]$sb.AppendLine("Query: $($rule.Query)")
+            [void]$sb.AppendLine("Severity: $($rule.Severity)")
+            [void]$sb.AppendLine("Type: $($rule.Type)")
+            [void]$sb.AppendLine("File: $relative")
+            [void]$sb.AppendLine("Line: $($m.LineNumber)")
+            [void]$sb.AppendLine("Description: $($rule.Description)")
+            [void]$sb.AppendLine('')
+        }
+    }
+} else {
+    [void]$sb.AppendLine("Source root not found: $SourceRoot")
+    [void]$sb.AppendLine('')
+}
+
+if ($localCount -eq 0) {
+    [void]$sb.AppendLine('No local pattern matches found in current source scan.')
+    [void]$sb.AppendLine('')
+}
+
 Set-Content -LiteralPath $OutFile -Value $sb.ToString() -Encoding UTF8
-Write-Host "fetch_sonar_issues: wrote $($all.Count) issue(s) summary to $OutFile"
+Write-Host "fetch_sonar_issues: wrote Sonar issues ($($all.Count)) + local code findings ($localCount) to $OutFile"

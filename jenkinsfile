@@ -51,7 +51,7 @@ pipeline {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                             def sonarUrl = 'http://localhost:9000'
                             def sonarKey = 'BugDemo'
-                            echo "AI input: fetching unresolved SonarQube issues from ${sonarUrl} (project ${sonarKey})."
+                            echo "AI input: fetching unresolved SonarQube issues + scanning source patterns from ${sonarUrl} (project ${sonarKey})."
                             withEnv([
                                 "SONAR_HOST_URL=${sonarUrl}",
                                 "SONAR_PROJECT_KEY=${sonarKey}"
