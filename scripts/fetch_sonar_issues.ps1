@@ -126,8 +126,12 @@ $rules = @(
 )
 
 if (Test-Path -LiteralPath $SourceRoot) {
+    $javaFiles = Get-ChildItem -Path $SourceRoot -Filter '*.java' -File -Recurse -ErrorAction SilentlyContinue
     foreach ($rule in $rules) {
-        $matches = Select-String -Path (Join-Path $SourceRoot '*.java') -Pattern $rule.Pattern -AllMatches -CaseSensitive:$false -Recurse
+        if (-not $javaFiles -or $javaFiles.Count -eq 0) {
+            continue
+        }
+        $matches = $javaFiles | Select-String -Pattern $rule.Pattern -AllMatches -CaseSensitive:$false
         foreach ($m in $matches) {
             $localCount++
             $relative = $m.Path.Replace((Get-Location).Path + '\', '')
