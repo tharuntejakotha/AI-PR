@@ -50,24 +50,26 @@ pipeline {
                         }
                     }
 
+                    def cxText = ''
                     try {
                         withCredentials([string(credentialsId: 'checkmarx-output', variable: 'CX_TEXT')]) {
-                            def text = (env.CX_TEXT ?: '').trim()
-                            if (text) {
-                                def current = readFile(file: 'checkmarx_input.txt')
-                                def merged = """${current}
------
-[Checkmarx export — dynamic credential input]
-${env.CX_TEXT}
-"""
-                                writeFile file: 'checkmarx_input.txt', text: merged
-                                echo 'AI input: appended checkmarx-output credential to dynamic Sonar/code findings.'
-                            } else {
-                                echo 'AI input: checkmarx-output credential found but empty; using Sonar/code findings only.'
-                            }
+                            cxText = (env.CX_TEXT ?: '')
                         }
                     } catch (Exception e) {
                         echo "Optional credential checkmarx-output not used (${e.message}). Using Sonar/code findings only."
+                    }
+
+                    if ((cxText ?: '').trim()) {
+                        def current = readFile(file: 'checkmarx_input.txt')
+                        def merged = """${current}
+-----
+[Checkmarx export — dynamic credential input]
+${cxText}
+"""
+                        writeFile file: 'checkmarx_input.txt', text: merged
+                        echo 'AI input: appended checkmarx-output credential to dynamic Sonar/code findings.'
+                    } else {
+                        echo 'AI input: checkmarx-output is empty or missing; continuing with Sonar/code findings only.'
                     }
                 }
             }
