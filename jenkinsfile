@@ -3,48 +3,141 @@ pipeline {
 
     stages {
 
+        // Multibranch / GitHub: use SCM from the job (PR branch). Avoid hardcoded branch so PR builds get CHANGE_ID.
         stage('Checkout') {
             steps {
-                git 'https://github.com/tharuntejakotha/bug-demo.git'
+                checkout scm
             }
         }
 
         stage('Build') {
             steps {
-                script {
-                    try {
-                        sh 'mvn clean install'
-                    } catch (Exception e) {
-                        env.BUILD_FAILED = "true"
-                        echo "Build failed"
-                    }
-                }
+                bat '.\\mvnw.cmd clean install'
             }
         }
 
+        // Dynamic analysis: full-project scan once per pipeline. Issues are read via API in the next stage.
         stage('Sonar Scan') {
             steps {
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    bat """
+                    .\\mvnw.cmd sonar:sonar ^
+                      -Dsonar.projectKey=BugDemo ^
+                      -Dsonar.host.url=http://localhost:9000 ^
+                      -Dsonar.login=%SONAR_TOKEN%
+                    """
+                }
+            }
+        }
+
+        // Build checkmarx_input.txt dynamically by combining Sonar + code scan with optional Checkmarx export.
+        stage('Collect security findings') {
+            steps {
                 script {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                        def sonarUrl = 'http://localhost:9000'
+                        def sonarKey = 'BugDemo'
+                        echo "AI input: fetching unresolved SonarQube issues + scanning source patterns from ${sonarUrl} (project ${sonarKey})."
+                        withEnv([
+                            "SONAR_HOST_URL=${sonarUrl}",
+                            "SONAR_PROJECT_KEY=${sonarKey}"
+                        ]) {
+                            powershell encoding: 'UTF-8', script: """
+                                Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                .\\scripts\\fetch_sonar_issues.ps1
+                            """
+                        }
+                    }
+
+                    def cxText = ''
                     try {
-                        sh 'mvn sonar:sonar'
+                        withCredentials([string(credentialsId: 'checkmarx-output', variable: 'CX_TEXT')]) {
+                            cxText = (env.CX_TEXT ?: '')
+                        }
                     } catch (Exception e) {
-                        env.SONAR_FAILED = "true"
-                        echo "Sonar check failed"
+                        echo "Optional credential checkmarx-output not used (${e.message}). Using Sonar/code findings only."
+                    }
+
+                    if ((cxText ?: '').trim()) {
+                        def current = readFile(file: 'checkmarx_input.txt')
+                        def merged = """${current}
+-----
+[Checkmarx export — dynamic credential input]
+${cxText}
+"""
+                        writeFile file: 'checkmarx_input.txt', text: merged
+                        echo 'AI input: appended checkmarx-output credential to dynamic Sonar/code findings.'
+                    } else {
+                        echo 'AI input: checkmarx-output is empty or missing; continuing with Sonar/code findings only.'
                     }
                 }
             }
         }
 
-        stage('AI Review') {
-            when {
-                expression {
-                    return env.BUILD_FAILED == "true" || env.SONAR_FAILED == "true"
+        // Sonar/Checkmarx-style payload -> OpenAI -> PR comment (requires PR build + credentials).
+        stage('AI PR comment from analysis') {
+            steps {
+                script {
+                    def githubOwner = 'tharuntejakotha'
+                    def githubRepo = 'AI-PR'
+                    def prNumber = (env.CHANGE_ID ?: env.ghprbPullId ?: '').trim()
+
+                    def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').trim()
+                    if (branch.startsWith('origin/')) {
+                        branch = branch.substring('origin/'.length())
+                    }
+
+                    if (!prNumber && branch) {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            withEnv(["BRANCH_FOR_PR_RESOLVE=${branch}"]) {
+                                prNumber = powershell(
+                                    encoding: 'UTF-8',
+                                    returnStdout: true,
+                                    script: """
+                                        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                        Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                        .\\scripts\\resolve_pr_number.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}'
+                                    """
+                                ).trim()
+                            }
+                        }
+                    }
+
+                    if (!prNumber) {
+                        echo 'Skipped AI PR comment: not a PR build (no CHANGE_ID/ghprbPullId and could not resolve PR from branch).'
+                        return
+                    }
+
+                    withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
+                        withEnv(['OPENAI_MODEL=gpt-4.1-mini']) {
+                            try {
+                                powershell encoding: 'UTF-8', script: """
+                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                    Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                    .\\scripts\\run_checkmarx_ai_jenkins.ps1 -InputFile 'checkmarx_input.txt'
+                                """
+                            } catch (e) {
+                                echo "OpenAI / Python step failed (no PR comment): ${e}"
+                                throw e
+                            }
+                        }
+                    }
+
+                    try {
+                        echo "GitHub PR comment step: GIT_COMMIT=${env.GIT_COMMIT}"
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                            powershell encoding: 'UTF-8', script: """
+                                Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+                                Set-Location -LiteralPath '${env.WORKSPACE.replace("'", "''")}'
+                                .\\scripts\\github_post_comment.ps1 -Owner '${githubOwner}' -Repo '${githubRepo}' -PrNumber ${prNumber}
+                            """
+                        }
+                    } catch (e) {
+                        echo "GitHub PR comment failed: ${e}"
+                    }
                 }
             }
-            steps {
-                sh 'curl http://localhost:8080/ai/review'
-            }
         }
-
     }
 }

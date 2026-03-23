@@ -1,0 +1,58 @@
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/tharuntejakotha/AI-PR.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean install'
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                sh 'mvn sonar:sonar'
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                // Tail of Jenkins log to send to OpenAI
+                def logTail = currentBuild.rawBuild.getLog(200).join('\n')
+
+                withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
+                    def prompt = """
+You are a CI/CD assistant.
+This is a failing Jenkins Maven build log. Explain the root cause in 3-5 lines
+and suggest minimal changes in Java/Maven/Jenkinsfile as comments.
+
+// Build log (tail):
+${logTail}
+"""
+
+                    sh """
+curl -s https://api.openai.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "messages": [
+      { "role": "system", "content": "You are a concise CI/CD debugging assistant." },
+      { "role": "user", "content": "${prompt.replace('"', '\\\\"')}" }
+    ],
+    "temperature": 0.2
+  }' | jq -r '.choices[0].message.content' || true
+"""
+                }
+            }
+        }
+    }
+}

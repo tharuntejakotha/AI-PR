@@ -1,0 +1,13 @@
+[Checkmarx POC sample – replace via secret CHECKMARX_OUTPUT or wire real Checkmarx export]
+
+Query: Divide_By_Zero
+Severity: High
+File: src/main/java/com/example/BugDemo/controller/BugController.java
+Line: 15
+Description: Integer division by zero: variable b is 0 when executing return a / b in GET /divide (ArithmeticException at runtime).
+
+Query: Hardcoded_Secret
+Severity: Medium
+File: src/main/resources/application.yaml
+Line: 7
+Description: Example finding – ensure no real secrets are committed.
